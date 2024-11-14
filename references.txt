@@ -1,0 +1,9 @@
+Articles to refer to:
+
+https://arxiv.org/pdf/1511.03296 
+
+https://d1wqtxts1xzle7.cloudfront.net/51957445/fast_bilateral_solver_dmag9b-libre.pdf?1488225302=&response-content-disposition=inline%3B+filename%3DDepth_Map_Improvement_Using_The_Fast_Bil.pdf&Expires=1731556908&Signature=JepzbX8N~Jwe70SIzAB7pj47-VjzNsj~Qm4uiL7a~ZAvP7pmyOlqbjDcVwTOikQWSPHyRn87GNGoh4B-diTa0Near~E14rFoAUJt8tdnXDRCY9k-Ck4h-DECT9WE0Xs18soZxMc26idL5A10qcj8wd90-xTmSRRmccArPvl~x-uaeyR5j4qNWXCcQFvEdjCkcEXN-onky2jzgBSG4uwOErZeW5KW7ba6mksnTD6XpisasmeHcAtq8PeLGpJBE5BvHPvomoXAx4tL0Ma8OTk8sYe4B5DD2NKs8Hv5hyI-pjYOqjULEL2g~NsmA5lp9K1i5iSOFm4RYmz7OQXrNF1FaA__&Key-Pair-Id=APKAJLOHF5GGSLRBV4ZA 
+
+https://people.csail.mit.edu/sparis/publi/2007/siggraph/Chen_07_Bilateral_Grid.pdf 
+
+https://arxiv.org/pdf/1603.02558 
