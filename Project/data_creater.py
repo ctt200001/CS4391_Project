@@ -15,6 +15,7 @@ def makeNoisyImage(image, mean, sigma):
 def makeConfidenceImage(image, sigma=0.1):
     #convert target image into a greyscale float 32 image
     target = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    target = target / 255
     target = target.astype(np.float32)
 
     #compute gradients of target
