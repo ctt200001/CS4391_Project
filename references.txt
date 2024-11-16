@@ -7,3 +7,5 @@ https://d1wqtxts1xzle7.cloudfront.net/51957445/fast_bilateral_solver_dmag9b-libr
 https://people.csail.mit.edu/sparis/publi/2007/siggraph/Chen_07_Bilateral_Grid.pdf 
 
 https://arxiv.org/pdf/1603.02558 
+
+https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/44003.pdf
