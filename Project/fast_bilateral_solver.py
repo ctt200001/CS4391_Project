@@ -2,6 +2,7 @@ import cv2
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.sparse as sp
 
 #To Do (i think):
 #1. The bilateral grid needs to be bistochastized. This should be done in another function or in the
@@ -27,53 +28,74 @@ import matplotlib.pyplot as plt
 
 
 
-#Returns two 3 dimensional grids
-#spatal_sampling_rate = downsampling factor that we divide image dimensions by to get bilateral grid dimensions
-#range_sampling_rate = number of bins per channel
-#Implements the "grid creation" section of the "real-time edge-aware image processing with the bilateral grid"
-#paper except the image intensity values and count values are split into two separate 3d grids for ease of use.
-#They can be combined by making a 3d grid of arrays and storing corresponding intensities and values in the
-#same cell.
-#Use both grids in tandem to have the bilateral grid.
-def makeBilateralGrid(image, spatial_sampling_rate=4, range_sampling_rate=8):
+#Return the bilateral grid of the argument image
+#Implements the "grid creation" section of "real-time edge-aware image processing with the bilateral grid"
+#expanded to 5 dimensions (the 6th dimension contains the cell's accumulated y, u, v, and count values)
+
+def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=8):
+    #normalize image
+    image = image.astype(np.float32)
+    image = image / 255
+    
     #calculate x and y dimensions of the intensity and count grids
     row_dim = round(image.shape[0]/spatial_sampling_rate)
     col_dim = round(image.shape[1]/spatial_sampling_rate)
 
     #create bilateral grid
-    intensity_grid = np.zeros([row_dim, col_dim, range_sampling_rate])
-    count_grid = np.zeros([row_dim, col_dim, range_sampling_rate])
+    bilateral_grid = np.zeros([row_dim, col_dim, range_sampling_rate, range_sampling_rate, range_sampling_rate, 4])
 
-    #normalize image
-    image = image.astype(np.float32)
-    image = image / 255
+    #create splat matrix (short, wide, sparse)
+    num_pixels = image.shape[0] * image.shape[1]
+    num_cells = row_dim * col_dim * (range_sampling_rate**3)
+    splat_matrix = sp.lil_matrix((num_pixels, num_cells))
+    
+    #get sizes of each dimension of bilateral grid for use when inserting into splat matrix
+    x_shape = bilateral_grid.shape[0]
+    y_shape = bilateral_grid.shape[1]
+    lum_shape = bilateral_grid.shape[2]
+    u_shape = bilateral_grid.shape[3]
+
+    #keep track of current pixel
+    curr_pixel = 0
 
     #go through all pixels in image
-    for y in range(image.shape[0]):
-        for x in range(image.shape[1]):
-            #calculate i, j, and k values
-            i = int(x/spatial_sampling_rate)
-            j = int(y/spatial_sampling_rate)
+    for image_y in range(image.shape[0]):
+        for image_x in range(image.shape[1]):
+            #calculate i and j values
+            i = int(image_x/spatial_sampling_rate)
+            j = int(image_y/spatial_sampling_rate)
             #only use luminance of curr pixel to calculate k for now
-            k = int(image[y, x, 0]/range_sampling_rate)
+            y = int(image[image_y, image_x, 0]/range_sampling_rate)
+            u = int(image[image_y, image_x, 1]/range_sampling_rate)
+            v = int(image[image_y, image_x, 2]/range_sampling_rate)
 
-            #trying to insert luminance (y) of curr pixel in the image intensity dimension for now
-            #might need to average u and v values later
-            intensity_grid[j, i, k] = intensity_grid[j, i, k] + image[y, x, 0]
-            #increment corresponding cell in count_grid
-            count_grid[j, i, k] = count_grid[j, i, k] + 1
+            #insert yuv and counter values into bilateral grid
+            bilateral_grid[j, i, y, u, v, 0] += image[image_y, image_x, 0]
+            bilateral_grid[j, i, y, u, v, 1] += image[image_y, image_x, 1]
+            bilateral_grid[j, i, y, u, v, 2] += image[image_y, image_x, 2]
+            bilateral_grid[j, i, y, u, v, 3] += 1
+
+            #calculate column index of splat matrix to insert into (the 1d equivalent index of the grid cell we
+            #we just inserted into)
+            cell_index = (v * x_shape * y_shape * lum_shape * u_shape) + (u * x_shape * y_shape * lum_shape) + (y * x_shape * y_shape) + (j * y_shape) + i 
+            #change the corresponding cell in the splat matrix to 1
+            splat_matrix[curr_pixel, cell_index] = 1
+        
+            #increment curr pixel
+            curr_pixel += 1
     
-    #uncomment the three lines below for testing
-    #plt.imshow(intensity_grid[:, :, 0])
-    #plt.colorbar()
-    #plt.show()
+    splat_matrix = splat_matrix.tocsr()
+    print(splat_matrix)    
 
+    #calculate blur matrix here (small and sparse)
+
+    #calculate slice matrix here (transpose of the splat matrix)
 
     #maybe add bistochastization algorithm here?
+    
 
-
-    #return grids
-    return intensity_grid, count_grid
+    #return bilateral grid
+    return bilateral_grid
     
 #Converts a RGB image to a YUV image
 #Returns YUV image in normalized float 32 nparray
@@ -114,5 +136,6 @@ if __name__ == "__main__":
     #convert reference image to YUV colorspace
     yuv_reference = cv2.cvtColor(reference, cv2.COLOR_BGR2YUV)
 
-    #get the intensity grid and count grid
-    instensity_grid, count_grid = makeBilateralGrid(yuv_reference)
+    #get bilateral grid
+    bilateral_grid = makeBilateralGrid(yuv_reference)
+    
