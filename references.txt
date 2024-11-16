@@ -9,3 +9,5 @@ https://people.csail.mit.edu/sparis/publi/2007/siggraph/Chen_07_Bilateral_Grid.p
 https://arxiv.org/pdf/1603.02558 
 
 https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/44003.pdf
+
+https://openaccess.thecvf.com/content_cvpr_2015/supplemental/Barron_Fast_Bilateral-Space_Stereo_2015_CVPR_supplemental.pdf
