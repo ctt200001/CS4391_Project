@@ -4,14 +4,6 @@ import matplotlib.pyplot as plt
 import scipy.sparse as sp
 import collections as col
 
-#To Do (i think):
-
-#2. Implement functions to construct the A matrix and b vector in equation 6 of the fast bilateral solver paper
-#   so that we can solve the linear system in equation 8.
-
-#3. A function where we can backproject the "solved" bilateral grid onto a pixel space, which results in
-#   our final image.
-
 #4. Set up some of the things mentioned in the "Preconditioning & Initialization" section of the fast
 #   bilateral solver paper? I don't think these are actually necessary, but they improve our run time.
 #   Probably save this for if we have time.
@@ -21,6 +13,56 @@ import collections as col
 #   to see how well our implementation smooths/filters out noise. Additionally, we could also measure
 #   the amount of time it takes our implementation to run vs how long it takes a bilateral filter or another
 #   bilateral solver to run to see if ours is "fast"?
+
+
+
+
+#Fills in the U and V chanels of the output yuv image with the average values inside the bilateral_grid.
+#Each pixel corresponds to a vertex (a grid cell that at least one pixel is assigned to).
+#Get the coordinates of that grid cell using the pixels and vertices hashmap, get the accumulated U and V
+#values there, and average them out by the counter (keeps track of the number of pixels assigned to that vertex)
+#to get the average values
+def getColors(output_yuv, bilateral_grid, pixels_and_vertices):
+    curr_pixel = 0
+    #loop through all pixels in output_yuv
+    for output_y in range(output_yuv.shape[0]):
+        for output_x in range(output_yuv.shape[1]):
+            #calculate the coordinates of the vertex in the bilateral grid
+            coords = pixels_and_vertices[curr_pixel]
+            j = coords[0]
+            i = coords[1]
+            y = coords[2]
+            u = coords[3]
+            v = coords[4]
+
+            #calculate the average u and v values
+            avg_u = bilateral_grid[j, i, y, u, v, 1] / bilateral_grid[j, i, y, u, v, 3]
+            avg_v = bilateral_grid[j, i, y, u, v, 2] / bilateral_grid[j, i, y, u, v, 3]
+
+            #assign the average u and v values to the second and third channel
+            #this works when it's swapped like this, otherwise the colors are switched around
+            output_yuv[output_y, output_x, 1] = avg_v
+            output_yuv[output_y, output_x, 2] = avg_u
+
+            #increment current pixel
+            curr_pixel +=1
+    
+    return output_yuv
+
+#Calculates A and b from eq. 6 so that we can solve eq. 7 (Ay = b) from the fast bilateral solver paper
+def prepareEquationParameters(splat_matrix, blur_components, target, confidence, D_n, D_m, smoothing_lambda=32):
+    #normalize target image
+    target = target.astype(np.float32)
+    target = target / 255
+
+    #normalize confidence image
+    confidence = confidence.astype(np.float32)
+    confidence = confidence / 255
+    
+    #calculate a and b
+    a = smoothing_lambda * (D_m - (D_n.dot(computeBlur(blur_components, D_n)))) + (sp.diags(splat_matrix.dot(confidence.flatten())))
+    b = splat_matrix.dot((confidence * target).flatten())
+    return a, b
 
 #Computes the entire blur matrix multiplied by a vector using the equation in "Fast Bilateral-Space Stereo
 #for Synthetic Defocus Supplemental Material"
@@ -44,9 +86,8 @@ def bistochastizeGrid(splat_matrix, blur_components):
     #do 10-20 iterations or until converged
     prev_n = n
     for i in range(15):
-        print(i)
         n = np.sqrt((n * m) / computeBlur(blur_components, n))
-        print(np.linalg.norm(n - prev_n))
+        #break from loop if converged
         if(np.linalg.norm(n - prev_n) < 10e-6):
             break
         prev_n = n
@@ -57,16 +98,21 @@ def bistochastizeGrid(splat_matrix, blur_components):
 
     return D_n, D_m
         
-            
-
 #Return the bilateral grid of the argument image
 #Implements the "grid creation" section of "real-time edge-aware image processing with the bilateral grid"
 #expanded to 5 dimensions (the 6th dimension contains the cell's accumulated y, u, v, and count values)
-#Also computes and returns the splat matrix, each dimension's blur matrix, and the slice matrix
-#The size of the bilateral grid is dependent on the spatial sampling rate and the range sampling rate
+#Also computes and returns the splat matrix, each dimension's blur matrix, and the slice matrix.
+#The splat matrix maps vertex to pixel correspondance, and contains a 1 at indices where pixels are assigned
+#to the vertex.
+#The blur matrix is calculated by computing the dot product of a vector with each dimension's blur matrix.
+#To get each dimensions blur matrix, you need to apply the [1 2 1] kernel to each dimension, so for all the
+#vertices in the grid, the function checks to see if it has neighbors and computes the kernel on them as well
+#if they do.
+#The slice matrix is the inverse of the splat.
+#The size of the bilateral grid is dependent on the the sampling rates.
 #There are test statements that you can uncomment to visualize the matricies, they should look like what is
 #presented on page 2 of the "Fast Bilateral-Space Stereo for Synthetic Defocus Supplemental Material"
-def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
+def makeBilateralGrid(image, spatial_sampling_rate=8, lum_sampling_rate=.15, uv_sampling_rate=.1):
     #normalize image
     image = image.astype(np.float32)
     image = image / 255
@@ -75,13 +121,13 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
     channel_Y, channel_U, channel_V = cv2.split(image)
 
     #calculate number of bins needed for bilateral grid for each channel
-    bins_Y = int(np.max(channel_Y)/range_sampling_rate) + 1
-    bins_U = int(np.max(channel_U)/range_sampling_rate) + 1
-    bins_V = int(np.max(channel_V)/range_sampling_rate) + 1
+    bins_Y = int(np.max(channel_Y)/lum_sampling_rate) + 1
+    bins_U = int(np.max(channel_U)/uv_sampling_rate) + 1
+    bins_V = int(np.max(channel_V)/uv_sampling_rate) + 1
     
     #calculate x and y dimensions of the intensity and count grids
-    row_dim = round(image.shape[0]/spatial_sampling_rate)
-    col_dim = round(image.shape[1]/spatial_sampling_rate)
+    row_dim = int(image.shape[0]/spatial_sampling_rate) + 1
+    col_dim = int(image.shape[1]/spatial_sampling_rate) + 1
 
     #create bilateral grid
     bilateral_grid = np.zeros([row_dim, col_dim, bins_Y, bins_U, bins_V, 4])
@@ -90,8 +136,10 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
     num_pixels = image.shape[0] * image.shape[1]
     num_vertices = 0
     
-    #create hashmap of vertices (keys) and list of pixels corresponding to each vertex (value)
+    #create hashmaps for later use
     vertices_and_pixels = col.defaultdict(list)
+    vertices_and_indices = col.defaultdict(list)
+    pixels_and_vertices = col.defaultdict(list)
 
     #keep track of current pixel
     curr_pixel = 0
@@ -102,13 +150,17 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
             #calculate i, j, y, u, v values
             i = int(image_x/spatial_sampling_rate)
             j = int(image_y/spatial_sampling_rate)
-            y = int(image[image_y, image_x, 0]/range_sampling_rate)
-            u = int(image[image_y, image_x, 1]/range_sampling_rate)
-            v = int(image[image_y, image_x, 2]/range_sampling_rate)
+            y = int(image[image_y, image_x, 0]/lum_sampling_rate)
+            u = int(image[image_y, image_x, 1]/uv_sampling_rate)
+            v = int(image[image_y, image_x, 2]/uv_sampling_rate)
 
             #increment number of vertices if new one is being inserted into
             if(bilateral_grid[j, i, y, u, v, 3] == 0):
+                vertices_and_indices[(j, i, y, u, v)] = num_vertices
                 num_vertices += 1
+
+            #store curr pixel and coordinate pair
+            pixels_and_vertices[curr_pixel] = [j, i, y, u, v]
 
             #insert yuv and counter values into bilateral grid
             bilateral_grid[j, i, y, u, v, 0] += image[image_y, image_x, 0]
@@ -120,7 +172,6 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
             #vertices_and_pixels[cell_index].append(curr_pixel)
             vertices_and_pixels[(j, i, y, u, v)].append(curr_pixel)
 
-        
             #increment curr pixel
             curr_pixel += 1
 
@@ -139,15 +190,14 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
             cols.append(pixel)
         sparse_row_index += 1
             
-    
     #create splat matrix
     #the splat matrix is a sparse matrix with # of vertices rows and # of pixels columns that has a 1
     #for every vertex and pixel pair
     splat_matrix = sp.csr_matrix((data, (rows, cols)), shape=(num_vertices, num_pixels))
     
     #uncomment to see splat_matrix
-    #plt.figure(figsize=(8, 8))
-    #plt.spy(splat_matrix.toarray(), markersize=5)
+    #lt.figure(figsize=(8, 8))
+    #plt.spy(splat_matrix, markersize=5)
     #plt.show()
 
     #calculate slice matrix here (transpose of the splat matrix)
@@ -155,7 +205,7 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
     
     #uncomment to see slice matrix
     #plt.figure(figsize=(8, 8))
-    #plt.spy(slice_matrix.toarray(), markersize=5)
+    #plt.spy(slice_matrix, markersize=5)
     #plt.show()
 
     #create a constituent blur matrix for each dimension of the bilateral grid
@@ -168,70 +218,59 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, range_sampling_rate=.2):
     #list that holds all consituent blur matrices
     blur_components = [x_blur, y_blur, lum_blur, u_blur, v_blur]
 
-    #go through all vertices in the hashmap and apply the [1 2 1] kernel
-    for vertex, pixels in vertices_and_pixels.items():
-        #apply kernel across all dimensions
-        for curr_dim in range(5):
-            
-            #apply kernel to current vertex
-            curr_index = list(vertices_and_pixels.keys()).index(vertex)
-        
-            #create arrays for making new csr_matrix, current vertex has weight of 2
-            curr_data = [2] * len(pixels)
-            curr_rows = [curr_index] * len(pixels)
-            curr_cols = [curr_index] * len(pixels)
-            
-            # Add the central vertex's contribution to the current dimension blur matrix
-            blur_components[curr_dim] = blur_components[curr_dim] + sp.csr_matrix((curr_data, (curr_rows, curr_cols)), shape=(num_vertices, num_vertices))
+    #apply kernel across all dimensions
+    for curr_dim in range(5):
+        #holds weights for each dimension
+        data = []
+        rows = []
+        cols = []
 
-            #add or subtract 1 from the current dimension of the current vertex to get its left or right neighbor
-            modified_vertex = list(vertex)  
+        #go through all vertices and apply the [1 2 1] kernel
+        for vertex, pixels in vertices_and_pixels.items():
+            #current vertex has a weight of 2
+            curr_index = vertices_and_indices[vertex]
+            data.extend([2] * len(pixels))  
+            rows.extend([curr_index] * len(pixels))  
+            cols.extend([curr_index] * len(pixels)) 
+            
+            #get coordinates of left and right neighbors
+            modified_vertex = list(vertex)
             modified_vertex[curr_dim] -= 1
             left_neighbor = tuple(modified_vertex)
             modified_vertex[curr_dim] += 2
             right_neighbor = tuple(modified_vertex)
-            
+
             #apply kernel to left neighbor if it exists
             if(left_neighbor in vertices_and_pixels):
-                left_row_index = list(vertices_and_pixels.keys()).index(vertex)
-                left_col_index = list(vertices_and_pixels.keys()).index(left_neighbor)
+                left_col_index = vertices_and_indices[left_neighbor]
+                data.extend([1] * len(pixels))
+                rows.extend([curr_index] * len(pixels))
+                cols.extend([left_col_index] * len(pixels))
                 
-                #create arrays for creating new csr_matrix
-                left_data = [1] * len(pixels)
-                left_rows = [left_row_index] * len(pixels)
-                left_cols = [left_col_index] * len(pixels)
-                
-                #add blur matrix of current vertex to corresponding dimension blur matrix
-                blur_components[curr_dim] = blur_components[curr_dim] + sp.csr_matrix((left_data, (left_rows, left_cols)), shape=(num_vertices, num_vertices))
-            
             #apply kernel to right neighbor if it exists
             if(right_neighbor in vertices_and_pixels):
-                right_row_index = list(vertices_and_pixels.keys()).index(vertex)
-                right_col_index = list(vertices_and_pixels.keys()).index(right_neighbor)
-                
-                #create arrays for creating new csr_matrix
-                right_data = [1] * len(pixels)
-                right_rows = [right_row_index] * len(pixels)
-                right_cols = [right_col_index] * len(pixels)
-                
-                #add blur matrix of current vertex to corresponding dimension blur matrix
-                blur_components[curr_dim] = blur_components[curr_dim] + sp.csr_matrix((right_data, (right_rows, right_cols)), shape=(num_vertices, num_vertices))
+                right_col_index = vertices_and_indices[right_neighbor]
+                data.extend([1] * len(pixels))
+                rows.extend([curr_index] * len(pixels))
+                cols.extend([right_col_index] * len(pixels))
+        
+        #add dimension blur matrix to blur components
+        blur_components[curr_dim] += sp.csr_matrix((data, (rows, cols)), shape=(num_vertices, num_vertices))
 
     #uncomment to see blur matrices
-    plt.figure(figsize=(8, 8))
-    #plt.spy(blur_components[0].toarray(), markersize=5)
+    #plt.figure(figsize=(8, 8))
+    #plt.spy(blur_components[0], markersize=5)
     #plt.show()
-    #plt.spy(blur_components[1].toarray(), markersize=5)
+    #plt.spy(blur_components[1], markersize=5)
     #plt.show()
-    #plt.spy(blur_components[2].toarray(), markersize=5)
+    #plt.spy(blur_components[2], markersize=5)
     #plt.show()
-    #plt.spy(blur_components[3].toarray(), markersize=5)
+    #plt.spy(blur_components[3], markersize=5)
     #plt.show()
-    #plt.spy(blur_components[4].toarray(), markersize=5)
+    #plt.spy(blur_components[4], markersize=5)
     #plt.show()
 
-    #return bilateral grid
-    return bilateral_grid, slice_matrix, blur_components, splat_matrix
+    return bilateral_grid, slice_matrix, blur_components, splat_matrix, pixels_and_vertices
 
 #Main
 if __name__ == "__main__":
@@ -241,14 +280,51 @@ if __name__ == "__main__":
     
     #read in data images for corresponding image name
     reference = np.copy(cv2.imread("data/" + filename + "_reference" + extension))
-    target = np.copy(cv2.imread("data/" + filename + "_target" + extension))
-    confidence = np.copy(cv2.imread("data/" + filename + "_confidence" + extension))
+    target = np.copy(cv2.imread("data/" + filename + "_target" + extension, cv2.IMREAD_GRAYSCALE))
+    target_rgb = np.copy(cv2.imread("data/" + filename + "_target" + extension))
+    confidence = np.copy(cv2.imread("data/" + filename + "_confidence" + extension, cv2.IMREAD_GRAYSCALE))
 
     #convert reference image to YUV colorspace
     yuv_reference = cv2.cvtColor(reference, cv2.COLOR_BGR2YUV)
 
-    #get bilateral grid, splat matrix, and slice matrix
-    bilateral_grid, slice_matrix, blur_components, splat_matrix = makeBilateralGrid(yuv_reference)
+    #get bilateral grid, splat matrix, slice matrix, and pixels and vertices hashmap
+    bilateral_grid, slice_matrix, blur_components, splat_matrix, pixels_and_vertices = makeBilateralGrid(yuv_reference)
 
+    #calculate bistochastize matrices
     D_n, D_m = bistochastizeGrid(splat_matrix, blur_components)
+
+    #get A and b
+    a, b = prepareEquationParameters(splat_matrix, blur_components, target, confidence, D_n, D_m)
     
+    #add regularization to a's diagonal to avoid matrix singularization
+    reg_lam = 10e-6
+    a = a + reg_lam * sp.csr_matrix(np.eye(a.shape[0]))
+
+    #solve for y, then compute dot product with slice matrix (more efficient than getting transpose of a)
+    y = sp.linalg.spsolve(a, b)
+    output = slice_matrix.dot(y)
+
+    #reshape output to matrix
+    output = output.reshape((reference.shape[0], reference.shape[1]))
+
+    #reshape output to have 3 channels
+    output_yuv = np.zeros((output.shape[0], output.shape[1], 3))
+    #put the grayscale output image in the first channel (this replaces the Y value)
+    output_yuv[..., 0] = output
+
+    #fill the rest of the channels and rescale YUV values in output
+    output_yuv = getColors(output_yuv, bilateral_grid, pixels_and_vertices)
+    output_yuv = output_yuv * 255
+    output_yuv = np.uint8(output_yuv)
+
+    #convert the yuv image back to rgb
+    output_rgb = cv2.cvtColor(output_yuv, cv2.COLOR_YUV2RGB)
+    
+    #get a version filtered by the opencv bilateral filter for comparison
+    cv2_filtered = cv2.bilateralFilter(target_rgb, d=9, sigmaColor = 75, sigmaSpace = 75)
+
+    #write both to the output folder
+    cv2.imwrite("output/" + filename + "_output" + extension, output_rgb)
+    cv2.imwrite("output/" + filename + "_cv2" + extension, cv2_filtered)
+
+    print("Filtering Completed")
