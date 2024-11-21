@@ -40,9 +40,8 @@ def getColors(output_yuv, bilateral_grid, pixels_and_vertices):
             avg_v = bilateral_grid[j, i, y, u, v, 2] / bilateral_grid[j, i, y, u, v, 3]
 
             #assign the average u and v values to the second and third channel
-            #this works when it's swapped like this, otherwise the colors are switched around
-            output_yuv[output_y, output_x, 1] = avg_v
-            output_yuv[output_y, output_x, 2] = avg_u
+            output_yuv[output_y, output_x, 1] = avg_u
+            output_yuv[output_y, output_x, 2] = avg_v
 
             #increment current pixel
             curr_pixel +=1
@@ -112,7 +111,7 @@ def bistochastizeGrid(splat_matrix, blur_components):
 #The size of the bilateral grid is dependent on the the sampling rates.
 #There are test statements that you can uncomment to visualize the matricies, they should look like what is
 #presented on page 2 of the "Fast Bilateral-Space Stereo for Synthetic Defocus Supplemental Material"
-def makeBilateralGrid(image, spatial_sampling_rate=8, lum_sampling_rate=.15, uv_sampling_rate=.1):
+def makeBilateralGrid(image, spatial_sampling_rate=8, lum_sampling_rate=.12, uv_sampling_rate=.09):
     #normalize image
     image = image.astype(np.float32)
     image = image / 255
@@ -285,7 +284,8 @@ if __name__ == "__main__":
     confidence = np.copy(cv2.imread("data/" + filename + "_confidence" + extension, cv2.IMREAD_GRAYSCALE))
 
     #convert reference image to YUV colorspace
-    yuv_reference = cv2.cvtColor(reference, cv2.COLOR_BGR2YUV)
+    yuv_reference = cv2.cvtColor(reference, cv2.COLOR_RGB2BGR)
+    yuv_reference = cv2.cvtColor(yuv_reference, cv2.COLOR_BGR2YUV)
 
     #get bilateral grid, splat matrix, slice matrix, and pixels and vertices hashmap
     bilateral_grid, slice_matrix, blur_components, splat_matrix, pixels_and_vertices = makeBilateralGrid(yuv_reference)
