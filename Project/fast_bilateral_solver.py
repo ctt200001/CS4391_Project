@@ -49,7 +49,7 @@ def getColors(output_yuv, bilateral_grid, pixels_and_vertices):
     return output_yuv
 
 #Calculates A and b from eq. 6 so that we can solve eq. 7 (Ay = b) from the fast bilateral solver paper
-def prepareEquationParameters(splat_matrix, blur_components, target, confidence, D_n, D_m, smoothing_lambda=32):
+def prepareEquationParameters(splat_matrix, blur_components, target, confidence, D_n, D_m, smoothing_lambda=64):
     #normalize target image
     target = target.astype(np.float32)
     target = target / 255
@@ -111,7 +111,7 @@ def bistochastizeGrid(splat_matrix, blur_components):
 #The size of the bilateral grid is dependent on the the sampling rates.
 #There are test statements that you can uncomment to visualize the matricies, they should look like what is
 #presented on page 2 of the "Fast Bilateral-Space Stereo for Synthetic Defocus Supplemental Material"
-def makeBilateralGrid(image, spatial_sampling_rate=8, lum_sampling_rate=.12, uv_sampling_rate=.09):
+def makeBilateralGrid(image, spatial_sampling_rate=5.5, lum_sampling_rate=.12, uv_sampling_rate=.08):
     #normalize image
     image = image.astype(np.float32)
     image = image / 255
@@ -274,7 +274,7 @@ def makeBilateralGrid(image, spatial_sampling_rate=8, lum_sampling_rate=.12, uv_
 #Main
 if __name__ == "__main__":
     #change these variables to match what image you want to work with
-    filename = "cablecar"
+    filename = "yacht"
     extension = ".bmp"
     
     #read in data images for corresponding image name
