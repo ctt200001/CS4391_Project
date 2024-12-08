@@ -7,7 +7,7 @@ import numpy as np
 
 #introduces noise to an image
 def makeNoisyImage(image, mean, sigma):
-    noise = np.random.normal(mean, sigma, image.shape).astype('uint8')
+    noise = np.random.normal(mean, sigma, image.shape).astype(np.uint8)
     noisy_image = cv2.add(noise, image)
     return noisy_image
 
@@ -15,8 +15,9 @@ def makeNoisyImage(image, mean, sigma):
 def makeConfidenceImage(image, sigma=0.1):
     #convert target image into a greyscale float 32 image
     target = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    target = target / 255
     target = target.astype(np.float32)
+    target = target / 255
+    
 
     #compute gradients of target
     x_grad = cv2.Sobel(target, cv2.CV_32F, 1, 0, ksize=3)
@@ -33,7 +34,7 @@ def makeConfidenceImage(image, sigma=0.1):
     confidence_image = confidence_image * 255
     
     #convert confidence image back to uint8
-    confidence_image = np.uint8(confidence_image)
+    confidence_image = confidence_image.astype(np.uint8)
     return confidence_image
 
 
@@ -67,5 +68,4 @@ if __name__ == "__main__":
 
 
 
-        
         
