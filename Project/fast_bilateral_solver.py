@@ -3,26 +3,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
 import collections as col
-
-#4. Set up some of the things mentioned in the "Preconditioning & Initialization" section of the fast
-#   bilateral solver paper? I don't think these are actually necessary, but they improve our run time.
-#   Probably save this for if we have time.
-
-#5. Functions to test our implementation of the fast bilateral solver. Maybe we can compare the PSNR/MSE 
-#   between the original image and our output vs. the original image and the output of a bilateral filter
-#   to see how well our implementation smooths/filters out noise. Additionally, we could also measure
-#   the amount of time it takes our implementation to run vs how long it takes a bilateral filter or another
-#   bilateral solver to run to see if ours is "fast"?
-
-
-
+import time
 
 #Fills in the U and V chanels of the output yuv image with the average values inside the bilateral_grid.
 #Each pixel corresponds to a vertex (a grid cell that at least one pixel is assigned to).
 #Get the coordinates of that grid cell using the pixels and vertices hashmap, get the accumulated U and V
 #values there, and average them out by the counter (keeps track of the number of pixels assigned to that vertex)
 #to get the average values
-def getColors(output_yuv, bilateral_grid, pixels_and_vertices):
+def getColors(output_yuv, bilateral_grid, pixels_and_vertices, yuv_reference):
     curr_pixel = 0
     #loop through all pixels in output_yuv
     for output_y in range(output_yuv.shape[0]):
@@ -49,7 +37,8 @@ def getColors(output_yuv, bilateral_grid, pixels_and_vertices):
     return output_yuv
 
 #Calculates A and b from eq. 6 so that we can solve eq. 7 (Ay = b) from the fast bilateral solver paper
-def prepareEquationParameters(splat_matrix, blur_components, target, confidence, D_n, D_m, smoothing_lambda=64):
+#orig value: smoothing lambda = 32
+def prepareEquationParameters(splat_matrix, blur_components, target, confidence, D_n, D_m, smoothing_lambda=8):
     #normalize target image
     target = target.astype(np.float32)
     target = target / 255
@@ -195,7 +184,6 @@ def makeBilateralGrid(image, spatial_sampling_rate=5.5, lum_sampling_rate=.12, u
     splat_matrix = sp.csr_matrix((data, (rows, cols)), shape=(num_vertices, num_pixels))
     
     #uncomment to see splat_matrix
-    #lt.figure(figsize=(8, 8))
     #plt.spy(splat_matrix, markersize=5)
     #plt.show()
 
@@ -203,19 +191,12 @@ def makeBilateralGrid(image, spatial_sampling_rate=5.5, lum_sampling_rate=.12, u
     slice_matrix = splat_matrix.transpose()
     
     #uncomment to see slice matrix
-    #plt.figure(figsize=(8, 8))
     #plt.spy(slice_matrix, markersize=5)
     #plt.show()
 
-    #create a constituent blur matrix for each dimension of the bilateral grid
-    x_blur = sp.csr_matrix((num_vertices, num_vertices))
-    y_blur = sp.csr_matrix((num_vertices, num_vertices))
-    lum_blur = sp.csr_matrix((num_vertices, num_vertices))
-    u_blur = sp.csr_matrix((num_vertices, num_vertices))
-    v_blur = sp.csr_matrix((num_vertices, num_vertices))
-
     #list that holds all consituent blur matrices
-    blur_components = [x_blur, y_blur, lum_blur, u_blur, v_blur]
+    #blur_components = [x_blur, y_blur, lum_blur, u_blur, v_blur]
+    blur_components = []
 
     #apply kernel across all dimensions
     for curr_dim in range(5):
@@ -228,9 +209,9 @@ def makeBilateralGrid(image, spatial_sampling_rate=5.5, lum_sampling_rate=.12, u
         for vertex, pixels in vertices_and_pixels.items():
             #current vertex has a weight of 2
             curr_index = vertices_and_indices[vertex]
-            data.extend([2] * len(pixels))  
-            rows.extend([curr_index] * len(pixels))  
-            cols.extend([curr_index] * len(pixels)) 
+            data.extend([2 * len(pixels)])  
+            rows.extend([curr_index])  
+            cols.extend([curr_index]) 
             
             #get coordinates of left and right neighbors
             modified_vertex = list(vertex)
@@ -242,22 +223,21 @@ def makeBilateralGrid(image, spatial_sampling_rate=5.5, lum_sampling_rate=.12, u
             #apply kernel to left neighbor if it exists
             if(left_neighbor in vertices_and_pixels):
                 left_col_index = vertices_and_indices[left_neighbor]
-                data.extend([1] * len(pixels))
-                rows.extend([curr_index] * len(pixels))
-                cols.extend([left_col_index] * len(pixels))
+                data.extend([len(pixels)])
+                rows.extend([curr_index])
+                cols.extend([left_col_index])
                 
             #apply kernel to right neighbor if it exists
             if(right_neighbor in vertices_and_pixels):
                 right_col_index = vertices_and_indices[right_neighbor]
-                data.extend([1] * len(pixels))
-                rows.extend([curr_index] * len(pixels))
-                cols.extend([right_col_index] * len(pixels))
+                data.extend([len(pixels)])
+                rows.extend([curr_index])
+                cols.extend([right_col_index])
         
         #add dimension blur matrix to blur components
-        blur_components[curr_dim] += sp.csr_matrix((data, (rows, cols)), shape=(num_vertices, num_vertices))
+        blur_components.append(sp.csr_matrix((data, (rows, cols)), shape=(num_vertices, num_vertices)))
 
     #uncomment to see blur matrices
-    #plt.figure(figsize=(8, 8))
     #plt.spy(blur_components[0], markersize=5)
     #plt.show()
     #plt.spy(blur_components[1], markersize=5)
@@ -274,7 +254,7 @@ def makeBilateralGrid(image, spatial_sampling_rate=5.5, lum_sampling_rate=.12, u
 #Main
 if __name__ == "__main__":
     #change these variables to match what image you want to work with
-    filename = "yacht"
+    filename = "cablecar"
     extension = ".bmp"
     
     #read in data images for corresponding image name
@@ -282,6 +262,9 @@ if __name__ == "__main__":
     target = np.copy(cv2.imread("data/" + filename + "_target" + extension, cv2.IMREAD_GRAYSCALE))
     target_rgb = np.copy(cv2.imread("data/" + filename + "_target" + extension))
     confidence = np.copy(cv2.imread("data/" + filename + "_confidence" + extension, cv2.IMREAD_GRAYSCALE))
+
+    #start measuring time for bilateral solver to finish
+    grid_start = time.time()
 
     #convert reference image to YUV colorspace
     yuv_reference = cv2.cvtColor(reference, cv2.COLOR_RGB2BGR)
@@ -300,7 +283,8 @@ if __name__ == "__main__":
     reg_lam = 10e-6
     a = a + reg_lam * sp.csr_matrix(np.eye(a.shape[0]))
 
-    #solve for y, then compute dot product with slice matrix (more efficient than getting transpose of a)
+    #solve for y, then compute dot product with slice matrix (more efficient than getting inverse of a)
+    #equation 13 of "The Fast Bilateral Solver"
     y = sp.linalg.spsolve(a, b)
     output = slice_matrix.dot(y)
 
@@ -313,18 +297,30 @@ if __name__ == "__main__":
     output_yuv[..., 0] = output
 
     #fill the rest of the channels and rescale YUV values in output
-    output_yuv = getColors(output_yuv, bilateral_grid, pixels_and_vertices)
+    output_yuv = getColors(output_yuv, bilateral_grid, pixels_and_vertices, yuv_reference)
     output_yuv = output_yuv * 255
     output_yuv = np.uint8(output_yuv)
 
     #convert the yuv image back to rgb
     output_rgb = cv2.cvtColor(output_yuv, cv2.COLOR_YUV2RGB)
     
+    #stop measuring time for bilateral solver and print how long it took 
+    grid_end = time.time()
+    print("Solver Completed")
+    print("Time: " + str(grid_end - grid_start))
+
     #get a version filtered by the opencv bilateral filter for comparison
-    cv2_filtered = cv2.bilateralFilter(target_rgb, d=9, sigmaColor = 75, sigmaSpace = 75)
+    filter_start = time.time()
+    cv2_filtered = cv2.bilateralFilter(target_rgb, d=9, sigmaColor = 130, sigmaSpace = 75)
+    filter_end = time.time()
+    print("Filtering Completed")
+    print("Time: " + str(filter_end - filter_start))
 
     #write both to the output folder
     cv2.imwrite("output/" + filename + "_output" + extension, output_rgb)
     cv2.imwrite("output/" + filename + "_cv2" + extension, cv2_filtered)
+    print("Output Written")
 
-    print("Filtering Completed")
+
+    
+    
